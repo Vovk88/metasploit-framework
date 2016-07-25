@@ -1,14 +1,16 @@
 ##
-# ## This file is part of the Metasploit Framework and may be subject to
-# redistribution and commercial restrictions. Please see the Metasploit
-# web site for more information on licensing and terms of use.
-#   http://metasploit.com/
+# This module requires Metasploit: http://metasploit.com/download
+# Current source: https://github.com/rapid7/metasploit-framework
 ##
 
 require 'msf/core'
 require 'rex'
 
-class Metasploit3 < Msf::Post
+class MetasploitModule < Msf::Post
+
+  include Msf::Module::Deprecated
+
+  deprecated(Date.new(2016, 2, 13), 'post/windows/manage/priv_migrate')
 
   def initialize(info={})
     super( update_info( info,
@@ -29,6 +31,11 @@ class Metasploit3 < Msf::Post
     server = client.sys.process.open
     original_pid = server.pid
     print_status("Current server process: #{server.name} (#{server.pid})")
+    if server.name.casecmp("winlogon.exe") == 0 or server.name.casecmp("explorer.exe") == 0
+      print_good("Current process is already in #{server.name} process, exiting.")
+      return
+    end
+
 
     uid = client.sys.config.getuid
 
